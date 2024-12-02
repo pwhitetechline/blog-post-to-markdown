@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blog to Markdown Converter</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8 max-w-3xl">
+        <h1 class="text-4xl font-bold text-center mb-8 text-gray-800">Blog to Markdown Converter</h1>
+        
+        <div class="bg-white rounded-lg shadow-lg p-6">
+            <div class="mb-6">
+                <label for="urls" class="block text-sm font-medium text-gray-700 mb-2">Blog Post URLs (one per line)</label>
+                <textarea id="urls" 
+                       class="w-full px-4 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 h-32"
+                       placeholder="https://example.com/blog-post-1&#10;https://example.com/blog-post-2"></textarea>
+            </div>
+            
+            <div class="mb-6">
+                <label class="flex items-center">
+                    <input type="checkbox" id="includeFrontMatter" checked
+                           class="rounded text-blue-600 focus:ring-blue-500 mr-2">
+                    <span class="text-sm text-gray-700">Include YAML Front Matter</span>
+                </label>
+            </div>
+            
+            <button onclick="convertToMarkdown()" 
+                    class="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 mb-6">
+                Convert to Markdown
+            </button>
+            
+            <div id="error" class="hidden mb-4 p-4 text-red-700 bg-red-100 rounded-md"></div>
+            
+            <div id="progress" class="hidden mb-4">
+                <div class="text-sm text-gray-600 mb-2">Converting URLs: <span id="progressCount">0/0</span></div>
+                <div class="w-full bg-gray-200 rounded-full h-2">
+                    <div id="progressBar" class="bg-blue-600 h-2 rounded-full" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <div id="results-container" class="space-y-4"></div>
+        </div>
+    </div>
+
+    <script>
+        function getFilenameFromUrl(url) {
+            try {
+                const path = url.replace(/\/$/, '');
+                const parts = path.split('/');
+                const lastPart = parts[parts.length - 1];
+                const baseFilename = lastPart.split('.')[0];
+                const cleanFilename = baseFilename
+                    .toLowerCase()
+                    .replace(/[^a-z0-9]+/g, '-')
+                    .replace(/^-+|-+$/g, '');
+                return cleanFilename + '.md';
+            } catch (error) {
+                return 'blog-post.md';
+            }
+        }
+
+        async function convertToMarkdown() {
+            const urlsTextarea = document.getElementById('urls');
+            const includeFrontMatter = document.getElementById('includeFrontMatter').checked;
+            const errorDiv = document.getElementById('error');
+            const progressDiv = document.getElementById('progress');
+            const progressBar = document.getElementById('progressBar');
+            const progressCount = document.getElementById('progressCount');
+            const resultsContainer = document.getElementById('results-container');
+            
+            // Clear previous results and errors
+            errorDiv.classList.add('hidden');
+            resultsContainer.innerHTML = '';
+            
+            // Get URLs (split by newline and remove empty lines)
+            const urls = urlsTextarea.value
+                .split('\n')
+                .map(url => url.trim())
+                .filter(url => url);
+            
+            if (urls.length === 0) {
+                errorDiv.textContent = 'Please enter at least one URL';
+                errorDiv.classList.remove('hidden');
+                return;
+            }
+
+            // Show progress bar
+            progressDiv.classList.remove('hidden');
+            progressCount.textContent = `0/${urls.length}`;
+            progressBar.style.width = '0%';
+
+            // Process each URL
+            for (let i = 0; i < urls.length; i++) {
+                const url = urls[i];
+                try {
+                    // Create result container for this URL
+                    const resultDiv = document.createElement('div');
+                    resultDiv.className = 'bg-gray-50 p-4 rounded-md';
+                    resultDiv.innerHTML = `
+                        <div class="flex justify-between items-start mb-2">
+                            <div class="text-sm font-medium text-gray-700">${url}</div>
+                            <div class="space-x-2">
+                                <button onclick="downloadMarkdown(this)" class="text-sm bg-green-600 text-white py-1 px-3 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-400">
+                                    Download
+                                </button>
+                                <button onclick="copyToClipboard(this)" class="text-sm bg-gray-200 text-gray-700 py-1 px-3 rounded-md hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400">
+                                    Copy
+                                </button>
+                            </div>
+                        </div>
+                        <textarea class="w-full h-32 px-4 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm" readonly></textarea>
+                    `;
+                    resultsContainer.appendChild(resultDiv);
+
+                    const response = await fetch('/convert', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ url, includeFrontMatter }),
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (!response.ok) {
+                        throw new Error(data.error || 'Failed to convert URL');
+                    }
+                    
+                    // Update textarea with markdown content
+                    const textarea = resultDiv.querySelector('textarea');
+                    textarea.value = data.markdown;
+                    textarea.dataset.url = url;
+
+                    // Update progress
+                    progressCount.textContent = `${i + 1}/${urls.length}`;
+                    progressBar.style.width = `${((i + 1) / urls.length) * 100}%`;
+                    
+                } catch (error) {
+                    const resultDiv = document.createElement('div');
+                    resultDiv.className = 'bg-red-50 p-4 rounded-md';
+                    resultDiv.innerHTML = `
+                        <div class="text-sm font-medium text-red-700">${url}</div>
+                        <div class="text-sm text-red-600 mt-1">Error: ${error.message}</div>
+                    `;
+                    resultsContainer.appendChild(resultDiv);
+                }
+            }
+
+            // Hide progress bar when done
+            progressDiv.classList.add('hidden');
+        }
+        
+        async function downloadMarkdown(button) {
+            const resultDiv = button.closest('div').parentElement.parentElement;
+            const textarea = resultDiv.querySelector('textarea');
+            const markdown = textarea.value;
+            const url = textarea.dataset.url;
+            
+            try {
+                const response = await fetch('/download', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        markdown: markdown,
+                        url: url
+                    }),
+                });
+                
+                if (!response.ok) {
+                    const data = await response.json();
+                    throw new Error(data.error || 'Failed to download file');
+                }
+                
+                // Get filename from URL
+                const filename = getFilenameFromUrl(url);
+                
+                // Create a blob from the response
+                const blob = await response.blob();
+                const downloadUrl = window.URL.createObjectURL(blob);
+                
+                // Create a temporary link and click it
+                const a = document.createElement('a');
+                a.href = downloadUrl;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                
+                // Cleanup
+                window.URL.revokeObjectURL(downloadUrl);
+                document.body.removeChild(a);
+                
+            } catch (error) {
+                alert('Error downloading file: ' + error.message);
+            }
+        }
+        
+        function copyToClipboard(button) {
+            const textarea = button.closest('div').parentElement.parentElement.querySelector('textarea');
+            textarea.select();
+            document.execCommand('copy');
+            window.getSelection().removeAllRanges();
+        }
+    </script>
+</body>
+</html>
